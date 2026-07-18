@@ -4,9 +4,9 @@ An interactive chat agent that answers natural language questions about the US p
 
 ## Demo
 
-**Live URL:** *(update after Railway deploy — copy the public URL here)*
+**Live URL:** *([URL here](https://vimsyz.com/census_bot))* 
 
-No authentication required — open the URL in any browser and start asking.
+No authentication required — open the URL in any browser and set password as name of the company. ❄️
 
 ## Architecture
 
