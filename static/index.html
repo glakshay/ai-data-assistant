@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Census AI · Snowflake</title>
+  <title>AI Data Assistant</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
   <style>
@@ -63,7 +63,7 @@
       flex-shrink: 0;
     }
     .header-left { display: flex; align-items: center; gap: 12px; }
-    .snow-icon {
+    .brand-icon {
       width: 34px; height: 34px;
       background: #ffffff;
       border-radius: 9px;
@@ -240,7 +240,7 @@
       resize: none; min-height: 48px; max-height: 130px;
       line-height: 1.5; outline: none; transition: border-color 0.2s;
     }
-    textarea:focus { border-color: var(--snow); }
+    textarea:focus { border-color: rgba(255,255,255,0.35); }
     textarea::placeholder { color: var(--muted); }
     #send-btn {
       background: #ffffff;
@@ -258,14 +258,12 @@
 </head>
 <body>
 
-<!-- PixelSnow canvas background -->
-<canvas id="snowCanvas" style="position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;"></canvas>
 
 <!-- Help modal -->
 <div class="modal-bg" id="helpModal">
   <div class="modal">
-    <h2>❄️ What can I help with?</h2>
-    <p>I can answer any question grounded in the US Open Census dataset.</p>
+    <h2>🤖 What can I help with?</h2>
+    <p>Ask natural-language questions about US population, income, housing, education, and demographics.</p>
     <div class="help-section">
       <h3>Population & Demographics</h3>
       <div class="help-q" onclick="useHelp(this)">What is the total population of California?</div>
@@ -296,10 +294,10 @@
 <div class="chat-wrap">
   <header>
     <div class="header-left">
-      <div class="snow-icon">❄️</div>
+      <div class="brand-icon">🤖</div>
       <div>
-        <div class="header-title">Census AI Agent</div>
-        <div class="header-sub">SNOWFLAKE · GROQ → DEEPSEEK → GEMINI</div>
+        <div class="header-title">AI Data Assistant</div>
+        <div class="header-sub">NATURAL LANGUAGE · US PUBLIC DATA</div>
       </div>
     </div>
     <div class="header-actions">
@@ -320,93 +318,6 @@
 </div>
 
 <script>
-  // ── Snow background (ported from census_bot.html) ──────────────────────────
-  // Transparent canvas over the existing page gradient → keeps the current colors,
-  // sits at z-index 0 (behind the chat box), so snow never falls over the text.
-  (function initSnow() {
-    const canvas = document.getElementById('snowCanvas');
-    const ctx = canvas.getContext('2d');
-    let W, H, flakes = [];
-
-    const DENSITY = 0.9;
-    const COLOR = '#ffffff';
-    // 4 tiers (dust → large) for depth
-    const TIERS = [
-      { size: 1.2, speed: 0.6, opacity: [0.25, 0.45] },
-      { size: 2.8, speed: 1.0, opacity: [0.40, 0.65] },
-      { size: 5.0, speed: 1.6, opacity: [0.55, 0.80] },
-      { size: 6.4, speed: 2.4, opacity: [0.70, 1.00] },
-    ];
-    const SHAPES = ['circle', 'hexagon', 'square', 'octagon'];
-
-    function spawn(initial, tierIndex) {
-      const t = TIERS[tierIndex];
-      const [oMin, oMax] = t.opacity;
-      return {
-        x: Math.random() * W,
-        y: initial ? Math.random() * H : -t.size,
-        r: t.size * (0.85 + Math.random() * 0.3),
-        speed: t.speed * (0.8 + Math.random() * 0.4),
-        opacity: oMin + Math.random() * (oMax - oMin),
-        wobble: Math.random() * Math.PI * 2,
-        wobbleSpeed: 0.008 + Math.random() * 0.015,
-        tier: tierIndex,
-        shape: SHAPES[Math.floor(Math.random() * 4)],
-      };
-    }
-
-    function resize() {
-      W = canvas.width = window.innerWidth;
-      H = canvas.height = window.innerHeight;
-      const count = Math.max(Math.floor(W * H * DENSITY / 10000), 300);
-      flakes = Array.from({ length: count }, (_, i) => spawn(true, i % TIERS.length));
-      for (let i = flakes.length - 1; i > 0; i--) {   // shuffle so tiers aren't banded
-        const j = Math.floor(Math.random() * (i + 1));
-        [flakes[i], flakes[j]] = [flakes[j], flakes[i]];
-      }
-    }
-
-    function drawShape(f) {
-      const r = f.r / 2;
-      ctx.beginPath();
-      if (f.shape === 'circle') {
-        ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
-      } else if (f.shape === 'square') {
-        ctx.rect(Math.round(f.x - r), Math.round(f.y - r), Math.ceil(f.r), Math.ceil(f.r));
-      } else {
-        const sides = f.shape === 'hexagon' ? 6 : 8;
-        const step = (Math.PI * 2) / sides;
-        for (let i = 0; i < sides; i++) {
-          const a = i * step - Math.PI / 2;
-          const px = f.x + r * Math.cos(a);
-          const py = f.y + r * Math.sin(a);
-          i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-      }
-      ctx.fill();
-    }
-
-    function draw() {
-      ctx.clearRect(0, 0, W, H);   // transparent — existing page background shows through
-      for (const f of flakes) {
-        f.wobble += f.wobbleSpeed;
-        f.x += Math.sin(f.wobble) * 0.4;
-        f.y += f.speed;
-        if (f.y > H + f.r) Object.assign(f, spawn(false, f.tier));
-        ctx.globalAlpha = f.opacity;
-        ctx.fillStyle = COLOR;
-        drawShape(f);
-      }
-      ctx.globalAlpha = 1;
-      requestAnimationFrame(draw);
-    }
-
-    window.addEventListener('resize', resize);
-    resize();
-    draw();
-  })();
-
   // ── State ──────────────────────────────────────────────────────────────────
   const msgs = document.getElementById('messages');
   const inputEl = document.getElementById('input');
@@ -416,7 +327,7 @@
 
   // ── Init greeting ──────────────────────────────────────────────────────────
   addBotMsg(
-    "Hi! 👋 I'm your US Census data assistant — powered by Snowflake, with automatic failover across Groq → DeepSeek → Gemini.\n\n" +
+    "Hi! 👋 I'm an AI assistant that answers questions about US population, income, housing, education, and demographics.\n\n" +
     "I can answer questions about US population, income, housing, education, employment, and demographics across all 50 states.\n\n" +
     "Click ❓ Help to see example questions, or just ask away!"
   );
@@ -441,8 +352,8 @@
     d.className = 'msg assistant' + (isError ? ' error' : '');
     d.innerHTML = `
       <div class="msg-meta">
-        <div class="msg-avatar">❄️</div>
-        <span class="msg-sender">Census AI</span>
+        <div class="msg-avatar">🤖</div>
+        <span class="msg-sender">Assistant</span>
       </div>
       <div class="msg-body">${esc(text)}</div>`;
     msgs.appendChild(d);
@@ -466,7 +377,7 @@
   function addThinking() {
     const d = document.createElement('div');
     d.className = 'thinking';
-    d.innerHTML = '<div class="dots"><span></span><span></span><span></span></div> Querying census data…';
+    d.innerHTML = '<div class="dots"><span></span><span></span><span></span></div> Working on it…';
     msgs.appendChild(d); scrollDown();
     return d;
   }
@@ -584,8 +495,8 @@
             aDiv.className = 'msg assistant streaming' + (isErr ? ' error' : '');
             aDiv.innerHTML = `
               <div class="msg-meta">
-                <div class="msg-avatar">❄️</div>
-                <span class="msg-sender">Census AI</span>
+                <div class="msg-avatar">🤖</div>
+                <span class="msg-sender">Assistant</span>
               </div>
               <div class="msg-body"></div>`;
             msgs.appendChild(aDiv);

@@ -102,15 +102,19 @@ query (e.g. a city name in several states, or two contradictory filters), output
   CANNOT_ANSWER: <brief reason>"""
 
 _SYNTH_SYSTEM = """\
-You are a helpful US Census data analyst. Answer the user's question from the query results.
-- Give ONLY the direct answer and the key figures, stated confidently and concisely (1-3 sentences).
-- Do NOT add methodology, disclaimers, or caveats to the user: no mention of the data year or \
-source, sampling, approximation, "estimate", coverage, SQL, tables, column codes, FIPS, or \
-"block groups". Filtering by a state/county returns the FULL geography — never imply it is partial.
-- The ONLY time you may say data isn't available is when the RESULTS ARE EMPTY, or a requested \
-metric truly isn't present. Never invent numbers.
-- If the user is correcting you or asking for more detail, acknowledge it and adjust.
-- Answer THIS question from THESE results only; do not carry over caveats or refusals from earlier turns."""
+You are a careful data analyst. Answer STRICTLY from the query results provided — accuracy over confidence.
+- Report only what the rows actually contain. Do NOT compute your own sums or averages ACROSS \
+multiple rows; if several rows are returned, list them (or the top few), don't collapse them into \
+one invented figure.
+- SANITY-CHECK every number before stating it: a percentage must be 0–100; counts and dollar amounts \
+must be plausible (a monthly rent isn't $300, a rate isn't 480%). If a value fails this, do NOT \
+present it as fact — say the result looks off and you can't confirm it.
+- If the question asks to COMPARE two things but the results cover only one, say plainly that only \
+that part is available — never imply a full comparison you don't have.
+- These are aggregated estimates, so use "about"/"approximately"; don't imply false precision, and \
+never invent or fill in numbers.
+- Be concise (1–4 sentences). Don't mention SQL, tables, or column codes.
+- Answer THIS question from THESE results only."""
 
 _FOLLOWUP_SYSTEM = """\
 Given a Census Q&A, suggest exactly 3 short follow-up questions. \
@@ -158,6 +162,27 @@ _ROUTE_STOP = {
     "people", "number", "from", "that", "this", "with", "have", "does", "show", "give",
     "united", "states", "percent", "percentage", "population", "your", "much", "many",
 }
+
+# Verified metric catalog: (trigger words all present in question, table suffix, exact-column hint).
+# This removes the model's guesswork on the common questions — it's the reliability lever, and it
+# costs zero extra latency/API calls (a keyword lookup that injects a hint into the SQL prompt).
+# Column codes below were verified against the dataset's FIELD_DESCRIPTIONS.
+_METRICS = [
+    (("rent",),           "B25", 'RENT → use "B25064e1" (Median Gross Rent, dollars), AVG across block groups. NEVER B25070/B25071 (rent as % of income).'),
+    (("home value",),     "B25", 'HOME VALUE → use "B25077e1" (Median Value, dollars), AVG.'),
+    (("house value",),    "B25", 'HOME VALUE → use "B25077e1" (Median Value, dollars), AVG.'),
+    (("property value",), "B25", 'HOME VALUE → use "B25077e1" (Median Value, dollars), AVG.'),
+    (("per capita",),     "B19", 'PER-CAPITA INCOME → use "B19301e1" (dollars), AVG. By race: B19301D=Asian, B19301I=Hispanic, B19301B=Black, B19301A=White.'),
+    (("income",),         "B19", 'INCOME → median household income is "B19013e1" (dollars), AVG. Per-person income is "B19301e1".'),
+    (("poverty",),        "B17", 'POVERTY RATE → SUM("B17021e2") / SUM("B17021e1") * 100 (below-poverty ÷ population for whom poverty is determined). Not the family/household subtables.'),
+    (("bachelor",),       "B15", 'BACHELOR+ % → (SUM("B15003e22")+SUM("B15003e23")+SUM("B15003e24")+SUM("B15003e25")) / SUM("B15003e1") * 100.'),
+    (("college",),        "B15", 'COLLEGE (bachelor+) % → (SUM("B15003e22")+SUM("B15003e23")+SUM("B15003e24")+SUM("B15003e25")) / SUM("B15003e1") * 100.'),
+    (("internet",),       "B28", 'NO-INTERNET % → SUM("B28002e13") / SUM("B28002e1") * 100 (no-internet ÷ total households). % WITH internet = 100 minus that.'),
+    (("broadband",),      "B28", 'INTERNET → total households "B28002e1", no-internet "B28002e13". % with internet = (e1 - e13)/e1*100.'),
+    (("hispanic",),       "B03", 'HISPANIC % → SUM("B03003e3") / SUM("B03003e1") * 100.'),
+    (("latino",),         "B03", 'HISPANIC % → SUM("B03003e3") / SUM("B03003e1") * 100.'),
+    (("population",),     "B01", 'TOTAL POPULATION → SUM("B01003e1").'),
+]
 
 
 def _strip_sql(raw: str) -> str:
@@ -339,7 +364,21 @@ def _run_census(
 
     # ── Step 1: Route to the relevant table(s) ───────────────────────────────
     relevant = _select_tables(user_message)
-    logger.info("Routed tables: %s", [t["full_name"] for t in relevant])
+
+    # Metric catalog: for known concepts, force the correct table into focus and collect an
+    # exact-column hint. This is the accuracy lever — it removes the model's column guesswork
+    # on the common questions, with no extra latency or API calls.
+    ql = user_message.lower()
+    metric_hints: list[str] = []
+    for triggers, suffix, hint in _METRICS:
+        if all(t in ql for t in triggers):
+            if hint not in metric_hints:
+                metric_hints.append(hint)
+            for t in tables:
+                if t["name"].endswith("_" + suffix) and t not in relevant:
+                    relevant.append(t)
+    logger.info("Routed tables: %s | metric hints: %d",
+                [t["full_name"] for t in relevant], len(metric_hints))
 
     # ── Step 2: Build schema context — routed tables' columns WITH descriptions ──
     fd = get_field_desc()
@@ -371,9 +410,14 @@ def _run_census(
     routed_names = {t["full_name"] for t in relevant}
     others = [t["full_name"] for t in get_tables() if t["full_name"] not in routed_names]
     other_line = "OTHER TABLES (names only — use if a metric isn't in the focus tables):\n" + ", ".join(others)
+    # Verified metric hints go FIRST and are authoritative — they override the model's own column pick.
+    hint_block = (
+        "=== METRIC HINTS (authoritative — use these EXACT columns/formulas) ===\n"
+        + "\n".join(metric_hints) + "\n\n"
+    ) if metric_hints else ""
     sql_system = (
-        _SQL_SYSTEM
-        + "\n\n=== FOCUS TABLE COLUMNS ('code' = description) ===\n" + focus_text
+        _SQL_SYSTEM + "\n\n" + hint_block
+        + "=== FOCUS TABLE COLUMNS ('code' = description) ===\n" + focus_text
         + "\n\n=== JOIN TABLES (metadata — use these EXACT columns) ===\n" + join_text
         + "\n\n=== " + other_line
     )
