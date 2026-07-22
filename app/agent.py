@@ -131,9 +131,9 @@ non-negative and not absurd (monthly rent roughly $300–$5,000, a rate never ab
 number is genuinely impossible or absurd, say it looks off and you can't confirm it. Do NOT flag a \
 value just because it is lower/higher than another or merely unexpected, e.g. a national average \
 being lower than a big city's rent is normal and correct, report both plainly.
-- If the question asks to COMPARE things but the results cover only one side, name the side that is \
-MISSING and still give the value(s) you do have (e.g. "I don't have the national average to compare, \
-but NYC's is about $X"), never imply a full comparison you don't have.
+- If the question asks to COMPARE things and BOTH sides are present in the results, state both plainly \
+and do NOT add any "I don't have ..." disclaimer. Only if a side is genuinely absent from the results, \
+briefly say which one is missing and give what you do have; never imply a full comparison you lack.
 - If a CITY was asked, the figure is a county-level proxy (the county, or aggregated counties, that \
 make up that city); note that briefly so it's clear it isn't a precise city-limits number.
 - These are aggregated estimates, so use "about"/"approximately"; don't imply false precision, and \
