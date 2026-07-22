@@ -39,6 +39,8 @@
       padding: 16px;
     }
 
+    /* Ambient snow behind the chat box (decorative, non-interactive) */
+    #snowCanvas { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
 
     /* Main chat container, black/white */
     .chat-wrap {
@@ -258,6 +260,7 @@
 </head>
 <body>
 
+<canvas id="snowCanvas"></canvas>
 
 <!-- Help modal -->
 <div class="modal-bg" id="helpModal">
@@ -554,6 +557,56 @@
     addBotMsg("Chat ended, your session has been cleared. 👋\n\nStart a new conversation anytime!");
     toast('Session cleared.');
   }
+
+  // ── Ambient snow (decorative, behind the chat box) ──────────────────────────
+  (function () {
+    const canvas = document.getElementById('snowCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let W, H, flakes = [];
+    const DENSITY = 0.5;
+    const TIERS = [
+      { size: 1.2, speed: 0.5, opacity: [0.10, 0.26] },
+      { size: 2.4, speed: 0.9, opacity: [0.18, 0.38] },
+      { size: 4.0, speed: 1.4, opacity: [0.28, 0.50] },
+    ];
+    function spawn(initial, tier) {
+      const t = TIERS[tier], oMin = t.opacity[0], oMax = t.opacity[1];
+      return {
+        x: Math.random() * W, y: initial ? Math.random() * H : -t.size,
+        r: t.size * (0.85 + Math.random() * 0.3),
+        speed: t.speed * (0.8 + Math.random() * 0.4),
+        opacity: oMin + Math.random() * (oMax - oMin),
+        wobble: Math.random() * Math.PI * 2,
+        wobbleSpeed: 0.006 + Math.random() * 0.014,
+        tier,
+      };
+    }
+    function resize() {
+      W = canvas.width = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      const total = Math.max(Math.floor(W * H * DENSITY / 10000), 120);
+      flakes = Array.from({ length: total }, (_, i) => spawn(true, i % TIERS.length));
+    }
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#ffffff';
+      for (const f of flakes) {
+        f.wobble += f.wobbleSpeed;
+        f.x += Math.sin(f.wobble) * 0.4;
+        f.y += f.speed;
+        if (f.y > H + f.r) Object.assign(f, spawn(false, f.tier));
+        ctx.globalAlpha = f.opacity;
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, f.r / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      requestAnimationFrame(draw);
+    }
+    window.addEventListener('resize', resize);
+    resize(); draw();
+  })();
 </script>
 </body>
 </html>
