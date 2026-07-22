@@ -182,6 +182,14 @@
       40% { transform: translateY(-6px); opacity: 1; }
     }
 
+    /* Provider-failover notice (shows the multi-model resilience instead of a silent switch) */
+    .status-line {
+      align-self: center; text-align: center; max-width: 92%;
+      font-family: 'Space Mono', monospace; font-size: 11px; color: var(--muted);
+      background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+      border-radius: 20px; padding: 4px 13px; margin: 2px 0;
+    }
+
     /* Toast */
     #toast {
       position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
@@ -385,6 +393,13 @@
     return d;
   }
 
+  function addStatusLine(text) {
+    const d = document.createElement('div');
+    d.className = 'status-line';
+    d.textContent = 'ⓘ ' + text;
+    msgs.appendChild(d); scrollDown();
+  }
+
   function addFollowups(questions, aDiv) {
     const row = document.createElement('div');
     row.className = 'followup-row';
@@ -486,6 +501,12 @@
           // Follow-up questions
           if (data.startsWith('[FOLLOWUPS]')) {
             followups = data.slice(11).split('|').filter(Boolean);
+            continue;
+          }
+
+          // Provider-failover notice (e.g. "groq hit its rate limit, switching to gemini")
+          if (data.startsWith('[STATUS]')) {
+            addStatusLine(data.slice(8));
             continue;
           }
 

@@ -121,15 +121,19 @@ async def chat(request: Request, body: ChatRequest):
                 if chunk.startswith("\n[FOLLOWUPS]"):
                     # Send followups as a special SSE event (no newline escaping)
                     yield f"data: {chunk.strip()}\n\n"
+                elif chunk.startswith("[STATUS]"):
+                    # Provider-failover notice, its own SSE event (single line, no escaping)
+                    yield f"data: {chunk}\n\n"
                 else:
                     escaped = chunk.replace("\n", "\\n")
                     yield f"data: {escaped}\n\n"
 
             yield "data: [DONE]\n\n"
 
-            # Save turn (strip followups from stored history)
+            # Save turn (strip followups + status notices from stored history)
             answer = "".join(
-                c for c in full_response if not c.startswith("\n[FOLLOWUPS]")
+                c for c in full_response
+                if not c.startswith("\n[FOLLOWUPS]") and not c.startswith("[STATUS]")
             )
             if answer:
                 append_turn(session_id, body.message, answer)

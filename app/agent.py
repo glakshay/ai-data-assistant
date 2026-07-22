@@ -207,6 +207,50 @@ _METRICS = [
     (("population",),     "B01", 'TOTAL POPULATION → SUM("B01003e1").'),
 ]
 
+# Cities the county-level data can't address directly. NYC is the trap: it is 5 counties, and
+# prompt-only guidance tends to grab only "New York County" (Manhattan, ~$2,023) or the whole NY
+# state (~$1,398) instead of the true 5-borough figure (~$1,640). Inject an authoritative filter
+# with the exact FIPS county names (verified against the dataset) so it's computed, not guessed.
+_NYC_HINT = (
+    'NEW YORK CITY = its 5 boroughs. Filter the FIPS join to "STATE"=\'NY\' AND "COUNTY" IN '
+    "('New York County','Kings County','Queens County','Bronx County','Richmond County') and "
+    "aggregate ALL 5. Do NOT use only New York County (that is Manhattan alone), and NEVER use the "
+    "whole NY state."
+)
+_CITY_HINTS = [
+    (("nyc",), _NYC_HINT),
+    (("new york city",), _NYC_HINT),
+]
+
+# Regions aren't a geography level in the data (only state + county), but the common ones map to a
+# clean SET OF STATES, so inject that as an authoritative filter instead of letting the model guess.
+# Triggers are unambiguous compound phrases (no bare "south"/"west" that collide with state names).
+_REGIONS = {
+    "east coast":        ["ME", "NH", "MA", "RI", "CT", "NY", "NJ", "DE", "MD", "VA", "NC", "SC", "GA", "FL"],
+    "west coast":        ["CA", "OR", "WA"],
+    "mountain west":     ["MT", "ID", "WY", "NV", "UT", "CO", "AZ", "NM"],
+    "midwest":           ["OH", "IN", "IL", "MI", "WI", "MN", "IA", "MO", "ND", "SD", "NE", "KS"],
+    "new england":       ["ME", "NH", "VT", "MA", "RI", "CT"],
+    "northeast":         ["ME", "NH", "VT", "MA", "RI", "CT", "NY", "NJ", "PA"],
+    "pacific northwest": ["WA", "OR", "ID"],
+    "southwest":         ["AZ", "NM", "TX", "OK", "NV"],
+}
+
+
+def _region_hint(name: str, states: list[str]) -> str:
+    inlist = ", ".join("'%s'" % s for s in states)
+    return (f'REGION "{name}" = filter the FIPS join to "STATE" IN ({inlist}) and aggregate across '
+            f'them (SUM for totals/counts, AVG for rates/medians).')
+
+
+# Appalachia is a COUNTY-level region (~13 states, parts of each), so a whole-state filter is only a
+# rough proxy, tell the model to say so rather than present it as exact.
+_APPALACHIA_HINT = (
+    "APPALACHIA is a county-level region spanning parts of ~13 states; it does NOT map to whole "
+    "states. Approximate with the core states \"STATE\" IN ('WV','KY','TN','VA','PA','OH','NC') and "
+    "state clearly in the answer that this is an approximation. Never present it as exact."
+)
+
 
 def _strip_sql(raw: str) -> str:
     raw = (raw or "").strip()
@@ -385,6 +429,10 @@ def _run_census(
                "Please try again in a moment.")
         return
 
+    # Provider-failover notes (e.g. "groq hit its rate limit, switching to gemini") collected during
+    # SQL generation, surfaced to the UI so a switch is visible instead of a silent stall.
+    notices: list[str] = []
+
     # ── Step 1: Route to the relevant table(s) ───────────────────────────────
     relevant = _select_tables(user_message)
 
@@ -400,6 +448,18 @@ def _run_census(
             for t in tables:
                 if t["name"].endswith("_" + suffix) and t not in relevant:
                     relevant.append(t)
+    # Deterministic city geography (NYC = 5 boroughs), injected as an authoritative hint.
+    for triggers, hint in _CITY_HINTS:
+        if all(t in ql for t in triggers) and hint not in metric_hints:
+            metric_hints.append(hint)
+    # Deterministic region geography (region -> set of states).
+    for name, states in _REGIONS.items():
+        if name in ql:
+            h = _region_hint(name, states)
+            if h not in metric_hints:
+                metric_hints.append(h)
+    if "appalachia" in ql and _APPALACHIA_HINT not in metric_hints:  # matches appalachia/appalachian
+        metric_hints.append(_APPALACHIA_HINT)
     logger.info("Routed tables: %s | metric hints: %d",
                 [t["full_name"] for t in relevant], len(metric_hints))
 
@@ -452,12 +512,16 @@ def _run_census(
     try:
         raw_sql = _strip_sql(llm.complete(
             sql_system, _messages(history, f"QUESTION: {user_message}"),
-            tier="main", temperature=0, max_tokens=600,
+            tier="main", temperature=0, max_tokens=600, notices=notices,
         ))
     except Exception as e:
         logger.exception("SQL generation failed")
         yield _friendly_err(e)
         return
+
+    for note in notices:  # surface any provider switch to the UI before the answer
+        yield f"[STATUS]{note}"
+    notices.clear()
 
     logger.info(">>> SQL: %s", raw_sql[:300])
 

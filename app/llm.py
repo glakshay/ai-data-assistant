@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_PROVIDER = os.environ.get("LLM_PROVIDER", "groq").lower()
 
 # Fallback order after the primary: the rest of these that have a key configured.
-# Groq first (fast), NVIDIA/DeepSeek next (accurate but slow), Gemini last (tight free tier).
-_ALL_PROVIDERS = ["groq", "nvidia", "gemini"]
+# Groq first (fast), Gemini next (reliable), then Ollama Cloud (free hosted, one-request-at-a-time),
+# NVIDIA/DeepSeek last (accurate but slow and prone to 504s, so it shouldn't block a working backup).
+_ALL_PROVIDERS = ["groq", "gemini", "ollama", "nvidia"]
 
 _MODELS = {
     "gemini": {
@@ -38,9 +39,18 @@ _MODELS = {
         "main": os.environ.get("NVIDIA_MAIN_MODEL", "deepseek-ai/deepseek-v4-pro"),
         "fast": os.environ.get("NVIDIA_FAST_MODEL", "deepseek-ai/deepseek-v4-flash"),
     },
+    "ollama": {  # Ollama Cloud (hosted, OpenAI-compatible). Free tier = one request at a time.
+        # gemma4:31b for BOTH tiers: head-to-head it beat gpt-oss on this pipeline 3/3 vs 0/3, the
+        # gpt-oss reasoning models return EMPTY SQL through the OpenAI-compatible endpoint (reasoning
+        # eats the token budget). gemma4 is non-reasoning, so it reliably emits SQL and followed the
+        # NYC-borough + comparison hints correctly. The strong coders (kimi/deepseek/glm) are paid.
+        "main": os.environ.get("OLLAMA_MAIN_MODEL", "gemma4:31b"),
+        "fast": os.environ.get("OLLAMA_FAST_MODEL", "gemma4:31b"),
+    },
 }
 
-_KEY_ENV = {"gemini": "GEMINI_API_KEY", "groq": "GROQ_API_KEY", "nvidia": "NVIDIA_API_KEY"}
+_KEY_ENV = {"gemini": "GEMINI_API_KEY", "groq": "GROQ_API_KEY", "nvidia": "NVIDIA_API_KEY",
+            "ollama": "OLLAMA_API_KEY"}
 
 # Retry only genuinely transient server errors, NOT 429/quota (retrying just burns it).
 _TRANSIENT = ("UNAVAILABLE", "INTERNAL", "503", "500", "DEADLINE", "OVERLOADED")
@@ -72,6 +82,18 @@ def _fallback_chain(primary: str) -> list[str]:
     return [p for p in ordered if _has_key(p)]
 
 
+def _fallback_note(failed: str, nxt: str, e: Exception) -> str:
+    """A short, user-facing reason for switching providers (for UI visibility)."""
+    s = str(e).upper()
+    if "429" in s or "RATE LIMIT" in s or "RESOURCE_EXHAUSTED" in s or "QUOTA" in s:
+        why = "hit its rate limit"
+    elif "504" in s or "TIMEOUT" in s or "DEADLINE" in s or "UNAVAILABLE" in s or "503" in s:
+        why = "was unavailable"
+    else:
+        why = "failed"
+    return f"{failed} {why}, switching to {nxt}…"
+
+
 def _retry(fn):
     for attempt in range(3):
         try:
@@ -85,17 +107,31 @@ def _retry(fn):
 
 
 # ── Clients ───────────────────────────────────────────────────────────────────
+# Per-request timeout so a slow/hung provider can't stall the whole turn, it errors out and the
+# fallback moves on. max_retries=0 stops the SDKs from silently retrying (e.g. a 504) before we fall
+# through, that internal retrying is what made a dead provider look like a hang.
+_TIMEOUT_S = 20.0
+
+
 def _gemini():
     if "gemini" not in _clients:
         from google import genai
-        _clients["gemini"] = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", "MISSING_KEY"))
+        try:
+            from google.genai import types
+            _clients["gemini"] = genai.Client(
+                api_key=os.environ.get("GEMINI_API_KEY", "MISSING_KEY"),
+                http_options=types.HttpOptions(timeout=int(_TIMEOUT_S * 1000)),  # ms
+            )
+        except Exception:  # older SDK without http_options.timeout, degrade gracefully
+            _clients["gemini"] = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", "MISSING_KEY"))
     return _clients["gemini"]
 
 
 def _groq():
     if "groq" not in _clients:
         from groq import Groq
-        _clients["groq"] = Groq(api_key=os.environ.get("GROQ_API_KEY", "MISSING_KEY"))
+        _clients["groq"] = Groq(api_key=os.environ.get("GROQ_API_KEY", "MISSING_KEY"),
+                                timeout=_TIMEOUT_S, max_retries=0)
     return _clients["groq"]
 
 
@@ -105,12 +141,30 @@ def _nvidia():
         _clients["nvidia"] = OpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=os.environ.get("NVIDIA_API_KEY", "MISSING_KEY"),
+            timeout=_TIMEOUT_S, max_retries=0,  # fail fast so a 504 falls straight to the next provider
         )
     return _clients["nvidia"]
 
 
+def _ollama():
+    if "ollama" not in _clients:
+        from openai import OpenAI  # Ollama Cloud is OpenAI-compatible
+        # Longer timeout than the other providers: the free tier loads the model on demand, so the
+        # first call after idle is a cold start that can take 30s+ (later calls are fast).
+        _clients["ollama"] = OpenAI(
+            base_url="https://ollama.com/v1",
+            api_key=os.environ.get("OLLAMA_API_KEY", "MISSING_KEY"),
+            timeout=60.0, max_retries=0,
+        )
+    return _clients["ollama"]
+
+
 def _oai_client(provider):
-    return _groq() if provider == "groq" else _nvidia()
+    if provider == "groq":
+        return _groq()
+    if provider == "ollama":
+        return _ollama()
+    return _nvidia()
 
 
 def _oai_messages(system, messages):
@@ -187,7 +241,8 @@ def _open_stream(provider, system, messages, tier, temperature, max_tokens) -> I
 
 
 # ── Public interface (best-of-N fallback) ─────────────────────────────────────
-def complete(system, messages, tier="main", temperature=0.0, max_tokens=600, provider=None) -> str:
+def complete(system, messages, tier="main", temperature=0.0, max_tokens=600, provider=None,
+             notices=None) -> str:
     # Explicit provider (e.g. bench.py) → no fallback, so comparisons stay honest.
     if provider is not None:
         return _complete_one(provider.lower(), system, messages, tier, temperature, max_tokens)
@@ -201,12 +256,15 @@ def complete(system, messages, tier="main", temperature=0.0, max_tokens=600, pro
             last = e
             if i < len(chain) - 1:  # any error -> try the next provider ("best of N")
                 logger.warning("LLM '%s' failed (%s), trying next provider", p, str(e)[:80])
+                if notices is not None:  # let the caller surface the switch to the UI
+                    notices.append(_fallback_note(p, chain[i + 1], e))
                 continue
             raise
     raise last
 
 
-def stream(system, messages, tier="fast", temperature=0.3, max_tokens=700, provider=None) -> Iterator[str]:
+def stream(system, messages, tier="fast", temperature=0.3, max_tokens=700, provider=None,
+           notices=None) -> Iterator[str]:
     if provider is not None:
         yield from _open_stream(provider.lower(), system, messages, tier, temperature, max_tokens)
         return
@@ -222,6 +280,8 @@ def stream(system, messages, tier="fast", temperature=0.3, max_tokens=700, provi
             last = e
             if i < len(chain) - 1:  # any error -> try the next provider
                 logger.warning("LLM '%s' stream failed (%s), trying next provider", p, str(e)[:80])
+                if notices is not None:
+                    notices.append(_fallback_note(p, chain[i + 1], e))
                 continue
             raise
     if gen is None:

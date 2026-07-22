@@ -30,9 +30,9 @@ Browser (chat UI, SSE stream)
 
 **Text-to-SQL, not RAG.** The data is relational, so the right pattern is to generate a SQL query and answer from the real rows, exact, grounded numbers instead of vector-search approximations.
 
-**Schema grounding.** The dataset's columns are opaque codes. At startup the app loads the dataset's own field-description metadata, maps every code to plain English, and relevance-ranks those descriptions per question, so the model is shown the right column instead of guessing one. On top of that, a small **verified metric catalog** pins the exact columns/formulas for the common questions (rent, income, poverty rate, education, internet access, home value, % Hispanic, …), so those are computed correctly rather than guessed, the accuracy lever, at zero extra latency.
+**Schema grounding.** The dataset's columns are opaque codes. At startup the app loads the dataset's own field-description metadata, maps every code to plain English, and relevance-ranks those descriptions per question, so the model is shown the right column instead of guessing one. On top of that, a small **verified metric catalog** pins the exact columns/formulas for the common questions (rent, income, poverty rate, education, internet access, home value, % Hispanic, …), so those are computed correctly rather than guessed, the accuracy lever, at zero extra latency. The same idea grounds **geography**: places that aren't a level in the data are resolved deterministically, cities to their real counties (e.g. NYC to its five boroughs, not just Manhattan or the whole state), and common regions to their state sets (East Coast, Mountain West, …).
 
-**Multi-provider LLM with failover.** A neutral provider layer (`app/llm.py`) uses a fast model for routing/synthesis/classification and a stronger model for SQL generation. If a provider is rate-limited or errors, the call transparently falls through to the next configured provider, so one provider's free-tier cap doesn't break the demo.
+**Multi-provider LLM with failover.** A neutral provider layer (`app/llm.py`) runs SQL generation on a stronger model and routing/synthesis/classification on a fast one, across up to four providers (Groq, Gemini, Ollama Cloud, NVIDIA). If a provider is rate-limited, times out, or errors, the call transparently falls through to the next one, with per-request timeouts so a slow provider can't stall the turn, and the switch is surfaced in the UI. One provider's free-tier cap doesn't break the demo.
 
 **Reliability.** Failed SQL self-corrects once (the DB error is fed back for a fix); the warehouse connection self-heals on session expiry; guardrails end the chat on inappropriate input and deflect off-topic questions; answers stream token-by-token over SSE.
 
@@ -45,7 +45,7 @@ uvicorn app.main:app --reload
 # open http://localhost:8000
 ```
 
-Set `LLM_PROVIDER` (`groq` | `nvidia` | `gemini`) and the matching API key; the others act as automatic fallbacks when their keys are present.
+Set `LLM_PROVIDER` (`groq` | `gemini` | `ollama` | `nvidia`) and the matching API key; the others act as automatic fallbacks when their keys are present.
 
 ## Tests
 
@@ -55,7 +55,7 @@ pytest tests/ -m "not integration" -v   # unit tests, no credentials needed
 
 ## Known limitations
 
-- **Uncommon aggregations can still be wrong.** Common metrics are pinned by the verified catalog and computed correctly. But questions *outside* the catalog, unusual cross-metric math or two-sided comparisons in one query, can still pick the wrong column or mis-aggregate. The synthesis step sanity-checks values (e.g. a percentage must be 0–100) and hedges rather than stating shaky figures; the durable general fix is an agentic multi-query loop with a verification pass, a natural next step.
+- **Uncommon aggregations can still be wrong.** Common metrics (verified catalog), common city/region geographies (NYC boroughs, coasts, Mountain West, …), and vs/"and" comparisons are handled deterministically. But questions *outside* those, unusual cross-metric math or a metric that isn't pinned, can still pick the wrong column or mis-aggregate. The synthesis step sanity-checks values (e.g. a percentage must be 0–100) and hedges rather than stating shaky figures. The durable general fix is a **verify-before-answer agentic loop** with a geography/metric resolver and a verification pass; the deterministic catalog + resolvers here are the pragmatic stand-in under free-tier latency constraints.
 - **In-memory sessions** reset on restart; Redis is the obvious production upgrade.
 - **Free-tier LLM limits** apply; a paid tier removes the per-minute caps that the provider failover works around.
 

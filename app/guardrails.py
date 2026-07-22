@@ -51,6 +51,18 @@ _SYSTEM = (
     "data, general knowledge."
 )
 
+# Strong, unambiguous data-topic words. If any appears, the message is a real data question and
+# must reach the SQL pipeline, so we override the LLM classifier (which occasionally misfires and
+# deflects a valid question as chitchat/off-topic). Safety checks above still run first, and this
+# also saves an API call. Keep these specific enough not to catch casual off-topic chatter.
+_CENSUS_KEYWORDS = (
+    "rent", "income", "poverty", "population", "demographic",
+    "home value", "house value", "property value", "per capita", "per-capita",
+    "bachelor", "college", "internet", "broadband",
+    "hispanic", "latino", "household", "housing", "mortgage", "homeowner",
+    "unemploy", "employment", "commute", "median household",
+)
+
 
 def _history_context(history: list[dict[str, Any]] | None) -> str:
     if not history:
@@ -86,6 +98,13 @@ def classify_intent(
             "Your message looks like it contains SQL/code control characters, so I didn't run it. "
             "Please ask about US Census data in plain language."
         )
+
+    # Deterministic census signal: a message with a clear data-topic keyword is always a real
+    # question, so route it straight to the pipeline, a flaky classifier can't deflect it.
+    low = text.lower()
+    if any(k in low for k in _CENSUS_KEYWORDS):
+        logger.info("GUARDRAIL → CENSUS (keyword): %s", message[:80])
+        return "census", ""
 
     ctx = _history_context(history)
     contents = f"Recent conversation:\n{ctx}\n\nNew message: {message}" if ctx else message
