@@ -16,7 +16,7 @@ class SnowflakeError(Exception):
 
 def _is_expired_token(e: Exception) -> bool:
     """The 'Authentication token has expired' error arrives as a generic exception,
-    not a SnowparkSessionException — so we sniff the message."""
+    not a SnowparkSessionException, so we sniff the message."""
     s = str(e).lower()
     return "expired" in s or "authenticate again" in s or "390114" in s
 
@@ -35,7 +35,7 @@ class SnowflakeClient:
                 "schema": os.environ["SNOWFLAKE_SCHEMA"],
                 "warehouse": os.environ["SNOWFLAKE_WAREHOUSE"],
                 "role": os.environ.get("SNOWFLAKE_ROLE", "ACCOUNTADMIN"),
-                # Heartbeat so the session doesn't expire on idle — fixes the recurring
+                # Heartbeat so the session doesn't expire on idle, fixes the recurring
                 # "Authentication token has expired" after the app sits idle a few hours.
                 "client_session_keep_alive": True,
             }).create()
@@ -62,7 +62,7 @@ class SnowflakeClient:
             # Expired token → drop the dead session, reconnect, and retry once (self-heal),
             # instead of failing until someone manually restarts the app.
             if _is_expired_token(e):
-                logger.warning("Snowflake session expired — reconnecting and retrying once")
+                logger.warning("Snowflake session expired, reconnecting and retrying once")
                 self._session = None
                 try:
                     return self._run(sql, max_rows)

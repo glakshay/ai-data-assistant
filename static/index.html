@@ -13,7 +13,7 @@
       --bg1: #020d1f;
       --bg2: #061a33;
       --bg3: #0a2a4a;
-      /* chat box — soft dark slate (lighter than pure black for better, uniform contrast) */
+      /* chat box, soft dark slate (lighter than pure black for better, uniform contrast) */
       --box-bg: rgba(24, 30, 43, 0.94);
       --surface: rgba(255,255,255,0.05);
       --surface2: rgba(255,255,255,0.08);
@@ -40,7 +40,7 @@
     }
 
 
-    /* Main chat container — black/white */
+    /* Main chat container, black/white */
     .chat-wrap {
       position: relative; z-index: 1;
       width: 100%; max-width: 780px;
@@ -313,7 +313,7 @@
       <textarea id="input" placeholder="Ask about US population, income, housing…" rows="1"></textarea>
       <button id="send-btn" onclick="sendMessage()">Send →</button>
     </div>
-    <div class="input-hint">Enter to send · Shift+Enter for new line · free tier — auto-failover if a model is rate-limited</div>
+    <div class="input-hint">Enter to send · Shift+Enter for new line · free tier, auto-failover if a model is rate-limited</div>
   </div>
 </div>
 
@@ -417,7 +417,7 @@
     btn.classList.add('reported');
     btn.textContent = '⚑ Reported';
     btn.disabled = true;
-    toast('Thanks for the feedback — we\'ll review it.');
+    toast('Thanks for the feedback, we\'ll review it.');
   }
 
   function handleCopy(btn) {
@@ -477,7 +477,7 @@
           const data = line.slice(6);
           if (data === '[DONE]') break;
 
-          // Server ended the chat (inappropriate content) — lock the UI after this message.
+          // Server ended the chat (inappropriate content), lock the UI after this message.
           if (data === '[ENDCHAT]') { chatEnded = true; continue; }
 
           // Follow-up questions
@@ -551,7 +551,7 @@
     if (busy) return;
     await fetch('/reset', { method: 'POST', credentials: 'include' });
     msgs.innerHTML = '';
-    addBotMsg("Chat ended — your session has been cleared. 👋\n\nStart a new conversation anytime!");
+    addBotMsg("Chat ended, your session has been cleared. 👋\n\nStart a new conversation anytime!");
     toast('Session cleared.');
   }
 </script>

@@ -23,7 +23,7 @@ from .snowflake_client import SnowflakeClient
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Rate limiter (casual — 15 requests / minute / session) ───────────────────
+# ── Rate limiter (casual, 15 requests / minute / session) ───────────────────
 # Note: in-process only; resets on restart. For prod, use Redis + sliding window.
 _rate_store: dict[str, list[float]] = defaultdict(list)
 _RATE_LIMIT = 15  # requests per minute per session
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     logger.info("LLM provider: %s (main=%s, fast=%s)",
                 llm.active_provider(), llm.model_for("main"), llm.model_for("fast"))
     _sf = SnowflakeClient()
-    logger.info("SnowflakeClient ready — discovering schema...")
+    logger.info("SnowflakeClient ready, discovering schema...")
     discover_schema(_sf)
     yield
     if _sf:
@@ -85,32 +85,32 @@ async def chat(request: Request, body: ChatRequest):
         try:
             # Rate limit check
             if _is_rate_limited(session_id):
-                yield "data: You're sending messages too quickly — please wait a moment and try again.\n\n"
+                yield "data: You're sending messages too quickly, please wait a moment and try again.\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
             history = get_history(session_id)
             meta = get_meta(session_id)
 
-            # Guardrail / intent classifier (sync Gemini call — run in thread).
+            # Guardrail / intent classifier (sync Gemini call, run in thread).
             # History is passed so follow-up corrections and closings stay in context.
             intent, guard_msg = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: classify_intent(body.message, history)
             )
             if intent == "inappropriate":
                 # Terminal: show the refusal, tell the UI to end the chat, wipe the session.
-                logger.warning("Inappropriate input — ending session %s", session_id[:8])
+                logger.warning("Inappropriate input, ending session %s", session_id[:8])
                 yield f"data: {guard_msg}\n\n"
                 yield "data: [ENDCHAT]\n\n"
                 yield "data: [DONE]\n\n"
                 clear_session(session_id)
                 return
-            if intent == "blocked":  # injection / too-short — show directly, chat continues
+            if intent == "blocked":  # injection / too-short, show directly, chat continues
                 yield f"data: {guard_msg}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
-            # Agent — run sync generator in thread, stream chunks as SSE.
+            # Agent, run sync generator in thread, stream chunks as SSE.
             # run_turn mutates `meta` in place (escalation + wind-down counters).
             chunks = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: list(run_turn(history, body.message, _sf, intent, meta))

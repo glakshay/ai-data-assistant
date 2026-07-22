@@ -6,7 +6,7 @@ from . import llm
 
 logger = logging.getLogger(__name__)
 
-# SQL/code control characters — treated as a (non-terminal) block.
+# SQL/code control characters, treated as a (non-terminal) block.
 _INJECTION_PATTERNS = re.compile(
     r"(;\s*(drop|delete|truncate|alter|create|insert|update)\b"
     r"|union\s+select"
@@ -40,14 +40,14 @@ _SYSTEM = (
     "for clearly illegal or dangerous activity. Choose this even if the message also mentions a "
     "census topic.\n"
     "- CENSUS: the message asks for US population, demographics, income, poverty, employment, "
-    "education, housing, geography, migration, or commute data — OR it is a follow-up, correction, "
+    "education, housing, geography, migration, or commute data, OR it is a follow-up, correction, "
     "or refinement of a previous census answer (e.g. 'add more detail', 'what about California').\n"
     "- CHITCHAT: greetings or questions about what you are or can do "
     "(e.g. 'hi', 'hello', 'what can you do', 'help'), or gratitude mid-conversation.\n"
-    "- CLOSING: the user is wrapping up — a goodbye, 'that's all', 'no thanks, I'm done', or an "
+    "- CLOSING: the user is wrapping up, a goodbye, 'that's all', 'no thanks, I'm done', or an "
     "affirmative reply confirming they need nothing else (especially right after the assistant "
     "asked whether that was everything).\n"
-    "- OFFTOPIC: anything else benign but unrelated — weather, coding help, jokes, other countries' "
+    "- OFFTOPIC: anything else benign but unrelated, weather, coding help, jokes, other countries' "
     "data, general knowledge."
 )
 
@@ -71,7 +71,7 @@ def classify_intent(
 
     Defense for harmful content: a deterministic regex backstop plus the LLM INAPPROPRIATE
     class. (The earlier Gemini-specific "safety block" signal was dropped when the provider
-    became swappable — the regex + classifier are provider-agnostic.)
+    became swappable, the regex + classifier are provider-agnostic.)
     """
     text = message.strip()
     if len(text) < 2:

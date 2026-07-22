@@ -123,7 +123,7 @@ def run_pipeline(llm, question, sf):
         topic = topics.get(t["full_name"], "")
         focus.append(f"TABLE: {t['full_name']}" + (f" (topics: {topic})" if topic else "") + "\n" + "\n".join(lines))
     joins = "\n".join(
-        f"{jt['full_name']} — {jt['note']}\n  columns: {', '.join(jt['columns'])}" for jt in get_join_tables()
+        f"{jt['full_name']}, {jt['note']}\n  columns: {', '.join(jt['columns'])}" for jt in get_join_tables()
     )
     sql_system = (
         _SQL_SYSTEM
@@ -188,12 +188,12 @@ def main():
         print(f"Gemini: main={gem['main']}  fast={gem['fast']}")
         providers["gemini"] = {"llm": gem, "sf": SnowflakeClient()}
     else:
-        print("Gemini: (skipped — no GEMINI_API_KEY)")
+        print("Gemini: (skipped, no GEMINI_API_KEY)")
     if groq:
         print(f"Groq:   main={groq['main']}  fast={groq['fast']}")
         providers["groq"] = {"llm": groq, "sf": SnowflakeClient()}
     else:
-        print("Groq:   (skipped — no valid GROQ_API_KEY)")
+        print("Groq:   (skipped, no valid GROQ_API_KEY)")
 
     for q in QUESTIONS:
         race(q, providers)

@@ -42,7 +42,7 @@ _MODELS = {
 
 _KEY_ENV = {"gemini": "GEMINI_API_KEY", "groq": "GROQ_API_KEY", "nvidia": "NVIDIA_API_KEY"}
 
-# Retry only genuinely transient server errors — NOT 429/quota (retrying just burns it).
+# Retry only genuinely transient server errors, NOT 429/quota (retrying just burns it).
 _TRANSIENT = ("UNAVAILABLE", "INTERNAL", "503", "500", "DEADLINE", "OVERLOADED")
 
 _clients: dict[str, object] = {}
@@ -200,7 +200,7 @@ def complete(system, messages, tier="main", temperature=0.0, max_tokens=600, pro
         except Exception as e:
             last = e
             if i < len(chain) - 1:  # any error -> try the next provider ("best of N")
-                logger.warning("LLM '%s' failed (%s) — trying next provider", p, str(e)[:80])
+                logger.warning("LLM '%s' failed (%s), trying next provider", p, str(e)[:80])
                 continue
             raise
     raise last
@@ -221,7 +221,7 @@ def stream(system, messages, tier="fast", temperature=0.3, max_tokens=700, provi
         except Exception as e:
             last = e
             if i < len(chain) - 1:  # any error -> try the next provider
-                logger.warning("LLM '%s' stream failed (%s) — trying next provider", p, str(e)[:80])
+                logger.warning("LLM '%s' stream failed (%s), trying next provider", p, str(e)[:80])
                 continue
             raise
     if gen is None:

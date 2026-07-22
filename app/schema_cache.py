@@ -1,5 +1,5 @@
 """
-Dynamic schema discovery for the SafeGraph / Snowflake "Open Census — Neighborhood
+Dynamic schema discovery for the SafeGraph / Snowflake "Open Census, Neighborhood
 Insights" dataset. Runs at startup and, crucially, loads the dataset's own METADATA:
 
   - FIELD_DESCRIPTIONS  → maps coded columns (e.g. "B25077e1") to plain English
@@ -59,7 +59,7 @@ def discover_schema(sf) -> None:
         if prefix and name.startswith(prefix) and len(name) > len(prefix) and name[len(prefix)] in ("B", "C"):
             full = _q(db, schema, name)
             try:
-                # Some ACS tables (e.g. B25 housing) have 1000+ columns — don't truncate,
+                # Some ACS tables (e.g. B25 housing) have 1000+ columns, don't truncate,
                 # or later subtables like B25077 (median value) get silently dropped.
                 col_rows = sf.execute_query(f"DESCRIBE TABLE {full}", max_rows=20000)
                 cols = [r.get("name") or r.get("NAME", "") for r in col_rows]
@@ -136,7 +136,7 @@ def _load_field_descriptions(sf, db: str, schema: str, year: str | None) -> None
         title = (r.get("TABLE_TITLE") or "").strip()
         universe = (r.get("TABLE_UNIVERSE") or "").strip()
         # FIELD_LEVEL_1 is usually "Estimate"/"Margin of Error"; deeper levels carry the
-        # detail that DISTINGUISHES columns (e.g. "below poverty level"). Lead with those —
+        # detail that DISTINGUISHES columns (e.g. "below poverty level"). Lead with those -
         # the shared title is shown once in the table header, so don't let it eat the budget.
         levels = [
             str(r[k]).strip() for k in sorted(r, key=lambda x: x.upper())
@@ -189,5 +189,5 @@ def get_schema_context() -> str:
     ]
     for t in _tables:
         topic = _table_topics.get(t["full_name"], "")
-        lines.append(f"- {t['full_name']}" + (f" — {topic}" if topic else ""))
+        lines.append(f"- {t['full_name']}" + (f", {topic}" if topic else ""))
     return "\n".join(lines)
